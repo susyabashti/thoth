@@ -1,46 +1,23 @@
 #!/usr/bin/env bun
 import { readdir } from "node:fs/promises";
-import { join, dirname, resolve, isAbsolute, relative } from "node:path";
+import { join, resolve, relative } from "node:path";
+import type {
+  FileMetadata,
+  PluginContext,
+  ScanResult,
+  ValidationError,
+} from "./types";
+import { loadConfig } from "./config";
 
-// --- Configuration & Types ---
-
-type BrokenLinkType =
-  "FILE_NOT_FOUND" | "HEADING_NOT_FOUND" | "EMPTY_TEXT_OR_LINK";
-
-interface BrokenLink {
-  text: string;
-  href: string;
-  line: number;
-  type: BrokenLinkType;
-}
-
-interface ScanResult {
-  absolutePath: string; // <-- Added explicit separation
-  relativePath: string; // <-- Added explicit separation
-  brokenLinks: BrokenLink[];
-  missingFrontmatter: string[];
-}
-
-interface FileMetadata {
-  absolutePath: string;
-  headings: string[];
-  title?: string;
-  description?: string;
-}
-
-// --- CLI Arguments Parsers ---
 const args = process.argv.slice(2);
 const isJsonMode = args.includes("--json");
-const isPlainMode = args.includes("--plain");
 const ignoreErrors = args.includes("--ignore-errors");
 const isQuietMode = args.includes("--quiet");
 const isPretty = args.includes("--pretty");
 const targetDir =
   args.find((arg) => !arg.startsWith("-") && !arg.startsWith("/")) || ".";
 
-// --- Color Helpers ---
-const useColor =
-  !Bun.env.NO_COLOR && Bun.env.TERM !== "dumb" && !isJsonMode && !isPlainMode;
+const useColor = !Bun.env.NO_COLOR && Bun.env.TERM !== "dumb" && !isJsonMode;
 const ESC = "\x1b[";
 const R = useColor ? `${ESC}0m` : "";
 const G = useColor ? `${ESC}32m` : "";
@@ -51,202 +28,13 @@ const DIM = useColor ? `${ESC}2m` : "";
 const BG_RED = useColor ? `${ESC}41;37;1m` : "";
 const BG_GREEN = useColor ? `${ESC}42;30;1m` : "";
 
-async function indexFileContent(absolutePath: string): Promise<FileMetadata> {
-  const content = await Bun.file(absolutePath).text();
-  const lines = content.split("\n");
-  const headings: string[] = [];
-  let title: string | undefined = undefined;
-  let description: string | undefined = undefined;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("#")) {
-      const cleanSlug = trimmed
-        .replace(/^#+\s+/, "")
-        .toLowerCase()
-        .replace(/[^\w\s-]/g, "")
-        .replace(/\s+/g, "-");
-      headings.push(cleanSlug);
-    }
-    if (trimmed.startsWith("title:")) {
-      title = trimmed
-        .replace(/^title:\s*/, "")
-        .replace(/['"]/g, "")
-        .toLowerCase();
-    }
-    if (trimmed.startsWith("description:")) {
-      description = trimmed
-        .replace(/^description:\s*/, "")
-        .replace(/['"]/g, "")
-        .toLowerCase();
-    }
-  }
-
-  return { absolutePath, headings, title, description };
-}
-
-const EXTENSIONS = [".md", ".mdx", "/index.md", "/index.mdx"];
-
-async function getReferenceValidationError(
-  href: string,
-  currentFilePath: string,
-  absoluteTargetDir: string,
-  catalog: Map<string, FileMetadata>,
-): Promise<BrokenLinkType | null> {
-  const [pathPart, hashPart] = href.split("#");
-  const cleanHref = decodeURIComponent(pathPart || "");
-  const targetHash = hashPart
-    ? decodeURIComponent(hashPart).toLowerCase()
-    : null;
-
-  let targetPath = "";
-
-  if (!cleanHref) {
-    targetPath = currentFilePath;
-  } else {
-    targetPath = isAbsolute(cleanHref)
-      ? resolve(
-          absoluteTargetDir,
-          cleanHref.startsWith("/") ? cleanHref.slice(1) : cleanHref,
-        )
-      : resolve(dirname(currentFilePath), cleanHref);
-
-    if (!(await Bun.file(targetPath).exists())) {
-      let foundExt = false;
-      for (const ext of EXTENSIONS) {
-        const altPath = resolve(dirname(currentFilePath), cleanHref + ext);
-        if (await Bun.file(altPath).exists()) {
-          targetPath = altPath;
-          foundExt = true;
-          break;
-        }
-      }
-      if (!foundExt) return "FILE_NOT_FOUND";
-    }
-  }
-
-  if (!targetHash) return null;
-
-  const hasHeading =
-    catalog.get(targetPath)?.headings.includes(targetHash) ?? false;
-  return hasHeading ? null : "HEADING_NOT_FOUND";
-}
-
-const LINK_REGEX =
-  /(?<!!)\[([^\]]*)\]\((?!(?:https?:|http:|mailto:|ftp:|tel:))([^)\s]*)(?:\s+"[^"]*")?\)/g;
-
-async function scanFileReferences(
-  file: string,
-  absoluteTargetDir: string,
-  catalog: Map<string, FileMetadata>,
-): Promise<ScanResult> {
-  const content = await Bun.file(file).text();
-  const lines = content.split("\n");
-  const brokenLinks: BrokenLink[] = [];
-  const missingFrontmatter: string[] = [];
-
-  // --- Validate Frontmatter ---
-  const meta = catalog.get(file);
-  if (!meta?.title) missingFrontmatter.push("title");
-  if (!meta?.description) missingFrontmatter.push("description");
-
-  // --- Validate Links ---
-  for (let i = 0; i < lines.length; i++) {
-    const lineText = lines[i];
-    if (!lineText || lineText.trim().length === 0) continue;
-
-    let match;
-    LINK_REGEX.lastIndex = 0;
-    while ((match = LINK_REGEX.exec(lineText)) !== null) {
-      const [_, text, href] = match;
-      if (!href || !text) {
-        brokenLinks.push({
-          text: text || "",
-          href: href || "",
-          line: i + 1,
-          type: "EMPTY_TEXT_OR_LINK",
-        });
-        continue;
-      }
-
-      const validationError = await getReferenceValidationError(
-        href,
-        file,
-        absoluteTargetDir,
-        catalog,
-      );
-
-      if (validationError) {
-        brokenLinks.push({ text, href, line: i + 1, type: validationError });
-      }
-    }
-  }
-
-  const rawRelative = relative(process.cwd(), file);
-  const formattedRelative = rawRelative.startsWith(".")
-    ? rawRelative
-    : `./${rawRelative}`;
-
-  return {
-    absolutePath: resolve(file),
-    relativePath: formattedRelative,
-    brokenLinks,
-    missingFrontmatter,
-  };
-}
-
-function reportFileResult(result: ScanResult): number {
-  const { relativePath, brokenLinks, missingFrontmatter } = result;
-  const totalErrors = brokenLinks.length + missingFrontmatter.length;
-
-  if (isJsonMode) return totalErrors;
-
-  if (totalErrors === 0) {
-    if (!isQuietMode) {
-      console.log(`${G}✔ PASSED${R} ${DIM}${relativePath}${R}`);
-    }
-    return 0;
-  }
-
-  console.log(`${RED}✘ FAILED${R} ${BOLD}${relativePath}${R}`);
-
-  for (const field of missingFrontmatter) {
-    console.log(
-      `  ${RED}├── Frontmatter Missing:${R} [${field}] metadata key.`,
-    );
-  }
-
-  for (const link of brokenLinks) {
-    switch (link.type) {
-      case "EMPTY_TEXT_OR_LINK":
-        console.log(
-          `  ${RED}└── Line ${link.line}:${R} Empty markdown link placeholder found: []().`,
-        );
-        break;
-
-      case "HEADING_NOT_FOUND":
-        console.log(
-          `  ${YEL}└── Line ${link.line}:${R} [${link.text}](${link.href}) -> Dead heading anchor link resource.`,
-        );
-        break;
-
-      case "FILE_NOT_FOUND":
-        console.log(
-          `  ${RED}└── Line ${link.line}:${R} [${link.text}](${RED}${link.href}${R}) -> Dead file reference path target.`,
-        );
-        break;
-      default:
-        throw new Error(
-          `Unhandled link validation type: ${JSON.stringify(link)}`,
-        );
-    }
-  }
-  console.log();
-  return totalErrors;
-}
-
-async function getMarkdownFiles(rootDir: string): Promise<string[]> {
-  const files: string[] = [];
+async function getTargetFiles(
+  rootDir: string,
+  extensions: string[],
+  configFiles: string[],
+): Promise<{ docs: string[]; configs: string[] }> {
+  const docs: string[] = [];
+  const configs: string[] = [];
   const queue = [rootDir];
 
   while (queue.length > 0) {
@@ -257,92 +45,153 @@ async function getMarkdownFiles(rootDir: string): Promise<string[]> {
       const fullPath = join(dir, entry.name);
       if (entry.isDirectory()) {
         queue.push(fullPath);
-        continue;
-      }
-      if (
-        entry.isFile() &&
-        (entry.name.endsWith(".md") || entry.name.endsWith(".mdx"))
-      ) {
-        files.push(fullPath);
+      } else if (entry.isFile()) {
+        // Dynamic lookups replacing string literals
+        if (extensions.some((ext) => entry.name.endsWith(ext))) {
+          docs.push(fullPath);
+        } else if (configFiles.includes(entry.name)) {
+          configs.push(fullPath);
+        }
       }
     }
   }
-  return files;
+  return { docs, configs };
 }
 
 function formatHighResDuration(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
   if (ms >= 1) return `${ms.toFixed(2)}ms`;
-  const microseconds = ms * 1000;
-  if (microseconds >= 1) return `${microseconds.toFixed(2)}μs`;
-  return `${(microseconds * 1000).toFixed(2)}ns`;
+  return `${(ms * 1000).toFixed(2)}μs`;
 }
 
-type Output = {
-  absoluteTargetDir: string;
-  relativeTargetDir: string;
-  failedFiles: ScanResult[];
-  executionError?: string;
-  stats: {
-    totalFilesScanned: number;
-    totalFailed: number;
-    totalBroken: { links: number; frontmatter: number };
-    duration: string;
-    durationMs: string;
-    timestamp: string;
-  };
-};
+function reportFileResult(result: ScanResult): number {
+  if (isJsonMode) return result.errors.length;
+  if (result.errors.length === 0) {
+    if (!isQuietMode)
+      console.log(`${G}✔ PASSED${R} ${DIM}${result.relativePath}${R}`);
+    return 0;
+  }
+
+  console.log(`${RED}✘ FAILED${R} ${BOLD}${result.relativePath}${R}`);
+  for (const err of result.errors) {
+    const linePrefix = err.line ? `Line ${err.line}: ` : "";
+    const color = err.type === "HEADING_NOT_FOUND" ? YEL : RED;
+    console.log(`  ${color}└── ${linePrefix}${R}${err.message}`);
+  }
+  console.log();
+  return result.errors.length;
+}
 
 async function main() {
   const absoluteTargetDir = resolve(targetDir);
-  const rawRelativeTarget = relative(process.cwd(), absoluteTargetDir);
-  const relativeTargetDir =
-    rawRelativeTarget === ""
-      ? "."
-      : rawRelativeTarget.startsWith(".")
-        ? rawRelativeTarget
-        : `./${rawRelativeTarget}`;
-
   const startTime = performance.now();
   const timestamp = new Date().toLocaleTimeString();
+
+  // Load custom workspace config and fallback defaults safely
+  const config = await loadConfig();
+  const plugins = config.plugins;
 
   if (!isJsonMode) {
     console.log(`\n ${BG_GREEN} SCAN ${R} ${DIM}${absoluteTargetDir}${R}\n`);
   }
 
-  const files = await getMarkdownFiles(absoluteTargetDir);
-  const totalFilesScanned = files.length;
-
-  const indexedData = await Promise.all(files.map(indexFileContent));
-  const catalog = new Map<string, FileMetadata>(
-    indexedData.map((data) => [data.absolutePath, data]),
-  );
-  const results = await Promise.all(
-    files.map((file) => scanFileReferences(file, absoluteTargetDir, catalog)),
+  // 1. One-pass directory crawl using configuration-driven criteria matrices
+  const { docs, configs } = await getTargetFiles(
+    absoluteTargetDir,
+    config.options.extensions!,
+    config.options.configFiles!,
   );
 
-  const failedFiles = results.filter((result) => reportFileResult(result) > 0);
-  const totalFailed = failedFiles.length;
-  const totalBroken = failedFiles.reduce(
-    (acc, result) => ({
-      links: acc.links + result.brokenLinks.length,
-      frontmatter: acc.frontmatter + result.missingFrontmatter.length,
+  const catalog = new Map<string, FileMetadata>();
+
+  // 2. Lifecycle Phase 1: Distributed Concurrent Index Processing Engine Loops
+  await Promise.all(
+    docs.map(async (file) => {
+      const content = await Bun.file(file).text();
+      const meta: FileMetadata = { absolutePath: file, headings: [] };
+
+      for (const plugin of plugins) {
+        if (plugin.index) {
+          const updates = await plugin.index(file, content);
+          Object.assign(meta, updates);
+        }
+      }
+      catalog.set(file, meta);
     }),
-    { links: 0, frontmatter: 0 },
   );
+
+  // Initialize runtime execution dependency injection graph parameters
+  const context: PluginContext = {
+    absoluteTargetDir,
+    catalog,
+    files: docs,
+    configs,
+    config: config.options,
+  };
+
+  // 3. Lifecycle Phase 2: Per-File Assert Validation Logic Loops
+  const results: ScanResult[] = await Promise.all(
+    docs.map(async (file) => {
+      const content = await Bun.file(file).text();
+      const errors: ValidationError[] = [];
+
+      for (const plugin of plugins) {
+        if (plugin.validate) {
+          const out = await plugin.validate(file, content, context);
+          errors.push(...out);
+        }
+      }
+
+      const rawRelative = relative(process.cwd(), file);
+      return {
+        absolutePath: file,
+        relativePath: rawRelative.startsWith(".")
+          ? rawRelative
+          : `./${rawRelative}`,
+        errors,
+      };
+    }),
+  );
+
+  // 4. Lifecycle Phase 3: Synchronous Global / Workspace Post-Validation Hooks
+  const globalErrors: ValidationError[] = [];
+  for (const plugin of plugins) {
+    if (plugin.afterValidate) {
+      const out = await plugin.afterValidate(context);
+      globalErrors.push(...out);
+    }
+  }
+
+  // 5. Aggregate Analytics Diagnostics & Error Consolidation Reports
+  const failedFiles = results.filter((res) => reportFileResult(res) > 0);
+  const totalFileErrors = failedFiles.reduce(
+    (acc, res) => acc + res.errors.length,
+    0,
+  );
+  const totalErrors = totalFileErrors + globalErrors.length;
 
   const rawDurationMs = performance.now() - startTime;
   const duration = formatHighResDuration(rawDurationMs);
 
+  // Output Global Architecture Blockers directly to CLI Channel
+  if (globalErrors.length > 0 && !isJsonMode) {
+    console.log(`${RED}${BOLD}✘ GLOBAL WORKSPACE ERRORS${R}`);
+    for (const err of globalErrors) {
+      console.log(`  ${RED}└── ${R}${err.message}`);
+    }
+    console.log();
+  }
+
+  // 6. Output Pipeline Target Handlers (JSON vs Human Readout Terminal Stream)
   if (isJsonMode) {
-    const output: Output = {
+    const output = {
       absoluteTargetDir,
-      relativeTargetDir,
       failedFiles,
+      globalErrors,
       stats: {
-        totalFailed,
-        totalBroken,
-        totalFilesScanned,
+        totalFilesScanned: docs.length,
+        totalFailed: failedFiles.length + (globalErrors.length > 0 ? 1 : 0),
+        totalErrors,
         durationMs: rawDurationMs.toFixed(4),
         duration,
         timestamp,
@@ -351,40 +200,29 @@ async function main() {
     console.log(
       isPretty ? JSON.stringify(output, null, 2) : JSON.stringify(output),
     );
-    return (totalBroken.links === 0 && totalBroken.frontmatter === 0) ||
-      ignoreErrors
-      ? 0
-      : 1;
+    return totalErrors === 0 || ignoreErrors ? 0 : 1;
   }
 
-  const passedCount = totalFilesScanned - totalFailed;
-
+  const passedCount = docs.length - failedFiles.length;
   console.log(
-    `${BOLD}  Doc Files${R}      ${totalFailed > 0 ? `${RED}${totalFailed} failed${R} | ` : ""}${G}${passedCount} passed${R} (${totalFilesScanned})`,
+    `${BOLD}  Doc Files${R}      ${failedFiles.length > 0 ? `${RED}${failedFiles.length} failed${R} | ` : ""}${G}${passedCount} passed${R} (${docs.length})`,
   );
   console.log(
-    `${BOLD}  References${R}     ${totalBroken.links > 0 ? `${RED}${totalBroken.links} dead links${R}` : `${G}all healthy${R}`}`,
+    `${BOLD}  Issues${R}         ${totalErrors > 0 ? `${RED}${totalErrors} errors found${R}` : `${G}all healthy${R}`}`,
   );
-  console.log(
-    `${BOLD}  Frontmatter${R}    ${totalBroken.frontmatter > 0 ? `${RED}${totalBroken.frontmatter} missing frontmatter${R}` : `${G}all healthy${R}`}`,
-  );
-  console.log(`${BOLD}  Start at${R}       ${timestamp}`);
   console.log(`${BOLD}  Duration${R}       ${duration}\n`);
 
-  if (totalBroken.links === 0 && totalBroken.frontmatter === 0) {
+  if (totalErrors === 0) {
     console.log(
-      ` ${BG_GREEN} DONE ${R} ${G}${BOLD}All markdown links are structurally solid!${R}\n`,
+      ` ${BG_GREEN} DONE ${R} ${G}${BOLD}All validations clean!${R}\n`,
     );
+    return 0;
   } else {
     console.log(
-      ` ${BG_RED} FAIL ${R} ${RED}${BOLD}Found broken markdown references.${R}\n`,
+      ` ${BG_RED} FAIL ${R} ${RED}${BOLD}Validation rules failed.${R}\n`,
     );
+    return ignoreErrors ? 0 : 1;
   }
-
-  return (totalBroken.links === 0 && totalBroken.frontmatter === 0) ||
-    ignoreErrors
-    ? 0
-    : 1;
 }
 
 main().then((code) => {

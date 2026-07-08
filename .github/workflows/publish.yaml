@@ -53,6 +53,11 @@ jobs:
       - name: Type check
         run: bunx tsc --noEmit
 
+      # vvv NEW BUILD STEP vvv
+      - name: Build standalone bundle
+        run: bun run prepublishOnly
+      # ^^^^^^^^^^^^^^^^^^^^^^
+
       - name: Publish (dry run)
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: bun publish --access public --dry-run

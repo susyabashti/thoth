@@ -3,6 +3,10 @@
   "version": "0.0.1",
   "main": "src/index.ts",
   "module": "src/index.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --target=bun --outdir ./dist",
+    "prepublishOnly": "bun build ./src/index.ts --target=bun --outfile ./dist/index.js"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
@@ -10,13 +14,13 @@
     "typescript": "5"
   },
   "bin": {
-    "thoth": "src/index.ts"
+    "thoth": "dist/index.ts"
   },
   "engines": {
     "bun": ">=1.0.0"
   },
   "files": [
-    "src"
+    "dist"
   ],
   "publishConfig": {
     "access": "public"
