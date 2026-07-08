@@ -1,0 +1,66 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (skip actual publish)"
+        type: boolean
+        default: true
+      fake_tag:
+        description: "Tag to simulate for the version check (e.g. v0.1.0). Ignored on real releases."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Verify package.json version matches release tag
+        run: |
+          RELEASE_TAG="${GITHUB_REF_NAME}"
+          if [ -n "${{ inputs.fake_tag }}" ]; then
+            RELEASE_TAG="${{ inputs.fake_tag }}"
+          fi
+          RELEASE_VERSION="${RELEASE_TAG#v}"
+          PACKAGE_VERSION="$(jq -r .version package.json)"
+
+          echo "Comparing tag '$RELEASE_TAG' (-> $RELEASE_VERSION) against package.json ($PACKAGE_VERSION)"
+
+          if [ "$RELEASE_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "::error::Release tag ($RELEASE_TAG -> $RELEASE_VERSION) does not match package.json version ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
+          echo "Version check passed: $PACKAGE_VERSION"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bunx tsc --noEmit
+
+      - name: Publish (dry run)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: bun publish --access public --dry-run
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}

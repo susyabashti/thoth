@@ -1,0 +1,25 @@
+{
+  "name": "@susyabashti/thoth",
+  "version": "0.0.0",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "5"
+  },
+  "bin": {
+    "thoth": "src/index.ts"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module"
+}
