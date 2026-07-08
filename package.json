@@ -14,7 +14,7 @@
     "typescript": "5"
   },
   "bin": {
-    "thoth": "dist/index.ts"
+    "thoth": "dist/index.js"
   },
   "engines": {
     "bun": ">=1.0.0"
