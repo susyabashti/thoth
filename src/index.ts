@@ -46,7 +46,6 @@ async function getTargetFiles(
       if (entry.isDirectory()) {
         queue.push(fullPath);
       } else if (entry.isFile()) {
-        // Dynamic lookups replacing string literals
         if (extensions.some((ext) => entry.name.endsWith(ext))) {
           docs.push(fullPath);
         } else if (configFiles.includes(entry.name)) {
@@ -87,7 +86,6 @@ async function main() {
   const startTime = performance.now();
   const timestamp = new Date().toLocaleTimeString();
 
-  // Load custom workspace config and fallback defaults safely
   const config = await loadConfig();
   const plugins = config.plugins;
 
@@ -95,7 +93,6 @@ async function main() {
     console.log(`\n ${BG_GREEN} SCAN ${R} ${DIM}${absoluteTargetDir}${R}\n`);
   }
 
-  // 1. One-pass directory crawl using configuration-driven criteria matrices
   const { docs, configs } = await getTargetFiles(
     absoluteTargetDir,
     config.options.extensions!,
@@ -104,7 +101,6 @@ async function main() {
 
   const catalog = new Map<string, FileMetadata>();
 
-  // 2. Lifecycle Phase 1: Distributed Concurrent Index Processing Engine Loops
   await Promise.all(
     docs.map(async (file) => {
       const content = await Bun.file(file).text();
@@ -120,7 +116,6 @@ async function main() {
     }),
   );
 
-  // Initialize runtime execution dependency injection graph parameters
   const context: PluginContext = {
     absoluteTargetDir,
     catalog,
@@ -129,7 +124,6 @@ async function main() {
     config: config.options,
   };
 
-  // 3. Lifecycle Phase 2: Per-File Assert Validation Logic Loops
   const results: ScanResult[] = await Promise.all(
     docs.map(async (file) => {
       const content = await Bun.file(file).text();
@@ -153,7 +147,7 @@ async function main() {
     }),
   );
 
-  // 4. Lifecycle Phase 3: Synchronous Global / Workspace Post-Validation Hooks
+  // 4. Lifecycle Phase 3: Global / Docs Post-Validation Hooks
   const globalErrors: ValidationError[] = [];
   for (const plugin of plugins) {
     if (plugin.afterValidate) {
@@ -162,7 +156,6 @@ async function main() {
     }
   }
 
-  // 5. Aggregate Analytics Diagnostics & Error Consolidation Reports
   const failedFiles = results.filter((res) => reportFileResult(res) > 0);
   const totalFileErrors = failedFiles.reduce(
     (acc, res) => acc + res.errors.length,
@@ -173,13 +166,42 @@ async function main() {
   const rawDurationMs = performance.now() - startTime;
   const duration = formatHighResDuration(rawDurationMs);
 
-  // Output Global Architecture Blockers directly to CLI Channel
+  // 5. Smart CLI Output grouping for Global Docs Configuration Blockers
   if (globalErrors.length > 0 && !isJsonMode) {
-    console.log(`${RED}${BOLD}✘ GLOBAL WORKSPACE ERRORS${R}`);
+    console.log(`${RED}${BOLD}✘ GLOBAL DOCS CONFIGURATION ERRORS${R}\n`);
+
+    // Group errors by their pre-computed relativePath property
+    const groupedGlobals = new Map<string, ValidationError[]>();
+    const generalErrors: ValidationError[] = [];
+
     for (const err of globalErrors) {
-      console.log(`  ${RED}└── ${R}${err.message}`);
+      if (err.relativePath) {
+        if (!groupedGlobals.has(err.relativePath)) {
+          groupedGlobals.set(err.relativePath, []);
+        }
+        groupedGlobals.get(err.relativePath)!.push(err);
+      } else {
+        generalErrors.push(err);
+      }
     }
-    console.log();
+
+    // Print file-context specific structural errors
+    for (const [relPath, errs] of groupedGlobals.entries()) {
+      console.log(`${RED}✘ CONFIG MISMATCH${R} ${BOLD}${relPath}${R}`);
+      for (const err of errs) {
+        console.log(`  ${RED}└── ${R}${err.message}`);
+      }
+      console.log();
+    }
+
+    // Fallback context: print unmapped general doc anomalies
+    if (generalErrors.length > 0) {
+      console.log(`${RED}✘ GENERAL DOCUMENTATION METRICS${R}`);
+      for (const err of generalErrors) {
+        console.log(`  ${RED}└── ${R}${err.message}`);
+      }
+      console.log();
+    }
   }
 
   // 6. Output Pipeline Target Handlers (JSON vs Human Readout Terminal Stream)
@@ -187,7 +209,7 @@ async function main() {
     const output = {
       absoluteTargetDir,
       failedFiles,
-      globalErrors,
+      globalErrors, // Stays flat JSON-side to ensure easy map/filter queries for tooling
       stats: {
         totalFilesScanned: docs.length,
         totalFailed: failedFiles.length + (globalErrors.length > 0 ? 1 : 0),

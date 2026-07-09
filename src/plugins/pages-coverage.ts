@@ -29,7 +29,7 @@ export const pagesCoveragePlugin = (): ThothPlugin => ({
       let metaContent;
       try {
         metaContent = await metaFile.json();
-      } catch (e) {
+      } catch {
         errors.push({
           type: "MALFORMED_META_JSON",
           absolutePath: metaPath,
@@ -43,7 +43,7 @@ export const pagesCoveragePlugin = (): ThothPlugin => ({
           type: "MISSING_META_JSON_FIELD",
           absolutePath: metaPath,
           relativePath,
-          message: `Workspace Check: Content schema is missing the required 'pages' array attribute field.`,
+          message: `Content schema is missing the required 'pages' array attribute field.`,
         });
         continue;
       }
@@ -56,10 +56,10 @@ export const pagesCoveragePlugin = (): ThothPlugin => ({
         allowedExtensions.some((ext) => pages.includes(`index${ext}`))
       ) {
         errors.push({
-          type: "INVALID_FIELD",
+          type: "INDEX_MUST_NOT_BE_INCLUDED",
           absolutePath: metaPath,
           relativePath,
-          message: `Global Check: The 'index' page must not be included in the 'pages' array.`,
+          message: `The 'index' page must not be included in the 'pages' array.`,
         });
       }
 
@@ -83,7 +83,7 @@ export const pagesCoveragePlugin = (): ThothPlugin => ({
             type: "ORPHANED_PAGE",
             absolutePath: metaPath,
             relativePath,
-            message: `Workspace Check: File '${slug}' exists physically in '${relativeDir}' directory but is missing from its local 'pages' configuration array.`,
+            message: `File '${slug}' exists physically in '${relativeDir}' directory but is missing from its local 'pages' configuration array.`,
           });
         }
       }

@@ -1,6 +1,6 @@
 # thoth
 
-A lightning-fast, highly extensible structural validator for markdown workspaces, written in TypeScript and optimized for the **Bun** runtime. 
+A lightning-fast, highly extensible structural validator for markdown docs, written in TypeScript and optimized for the **Bun** runtime. 
 
 Named after the Egyptian deity of wisdom, scribes, and precise calculation, `thoth` indexes your documentation ecosystem into an in-memory structural catalog to validate file paths, heading anchors, frontmatter integrity, and global directory coverage metrics at native runtime speeds.
 
@@ -14,7 +14,7 @@ LLMs and AI agents are brilliant at reasoning, drafting, and architecting—but 
 * **Saturate Context:** They flood their context window with raw directory listings.
 * **Hallucinate:** They "guess" paths, causing documentation to break silently as folders shift.
 
-**`thoth`** moves verification out of the agent's "brain" and into your local workspace runtime or CI/CD pipeline. It gives your agents a deterministic, machine-readable source of truth. When `thoth` flags a workspace, the agent receives a precise line-number reference and an explicit error type—enabling it to fix problems autonomously.
+**`thoth`** moves verification out of the agent's "brain" and into your local repo runtime or CI/CD pipeline. It gives your agents a deterministic, machine-readable source of truth. When `thoth` flags an error, the agent receives a precise line-number reference and an explicit error type—enabling it to fix problems autonomously.
 
 ---
 
@@ -35,7 +35,7 @@ LLMs and AI agents are brilliant at reasoning, drafting, and architecting—but 
 
 1. **`index` Phase:** Concurrent, parallel reading of all target files to populate a lightweight in-memory metadata `catalog` mapping global heading slugs and custom metrics.
 2. **`validate` Phase:** Per-file stream processing (e.g., verifying local syntax rules, validating inline frontmatter attributes, or cross-referencing heading hashes against the global catalog map).
-3. **`afterValidate` Phase:** A synchronous workspace post-processing hook designed for architectural checks—such as scanning for missing config blueprints or identifying orphaned files across the directory tree.
+3. **`afterValidate` Phase:** A synchronous docs post-processing hook designed for architectural checks—such as scanning for missing config blueprints or identifying orphaned files across the directory tree.
 
 ---
 
