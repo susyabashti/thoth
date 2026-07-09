@@ -1,6 +1,6 @@
 {
   "name": "@susyabashti/thoth",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "main": "src/index.ts",
   "module": "src/index.ts",
   "scripts": {
